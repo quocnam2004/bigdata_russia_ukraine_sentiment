@@ -1,0 +1,34 @@
+# Ignore data files
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Spark
+*.log
+metastore_db/
+spark-warehouse/
+
+# Results
+*.png
+*.csv
+*.parquet
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
