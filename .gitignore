@@ -1,15 +1,3 @@
-# Ignore data files but keep folder structure
-data/*
-!data/.gitkeep
-!data/raw/
-!data/processed/
-!data/results/
-data/raw/*
-data/processed/*
-data/results/*
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-!data/results/.gitkeep
 
 # Python
 __pycache__/
@@ -28,10 +16,7 @@ build/
 metastore_db/
 spark-warehouse/
 
-# Results
-*.png
-*.csv
-*.parquet
+
 
 # IDE
 .vscode/
