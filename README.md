@@ -195,15 +195,3 @@ Thực hiện lại các lệnh `spark-submit` như ở **Trường hợp 1**.
 
 ---
 
-## 👥 Tác giả
-
-**Đồ án cuối môn Big Data**
-- 🏫 Trường: Đại học Công nghệ TP.HCM (HUTECH)
-- 📚 Môn học: Big Data
-- 📅 Năm học: 2024-2025
-
----
-
-<div align="center">
-  <strong>⭐ Nếu thấy hữu ích, hãy cho repo một ngôi sao! ⭐</strong>
-</div>
