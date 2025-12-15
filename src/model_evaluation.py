@@ -4,78 +4,70 @@ import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 from pyspark.sql import SparkSession
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator
-from pyspark.sql.functions import col, when, lit
-from pyspark.ml.feature import StringIndexer
+from pyspark.mllib.evaluation import MulticlassMetrics
+from pyspark.sql.types import FloatType
+from pyspark.sql.functions import col
 
+# ========================================================
+# 1. KHỞI TẠO SPARK
+# ========================================================
 spark = SparkSession.builder \
     .appName("Model_Evaluation") \
-    .config("spark.hadoop.fs.defaultFS", "hdfs://localhost:9000") \
+    .master("local[2]") \
+    .config("spark.driver.memory", "4g") \
     .getOrCreate()
 
-# 1. Đọc dữ liệu kết quả
-data_path = "hdfs://localhost:9000/data/results/sentiment_tweets_ml"
-print(f">>> Đang đọc dữ liệu đánh giá từ: {data_path}")
-df = spark.read.parquet(data_path)
+# ========================================================
+# 2. ĐỌC DỮ LIỆU DỰ ĐOÁN
+# ========================================================
+pred_path = "hdfs://localhost:9000/data/results/sentiment_predictions"
+print(f">>> Đang đọc kết quả dự đoán từ: {pred_path}")
+df_pred = spark.read.parquet(pred_path)
 
-# 2. Tái tạo cột label (dạng số) để so sánh
-# Vì MulticlassClassificationEvaluator cần cột label dạng số (double), 
-# ta cần map lại 'predicted_sentiment' và label gốc (từ rule-based) sang số.
+# ========================================================
+# 3. CHUẨN BỊ DỮ LIỆU ĐÁNH GIÁ
+# ========================================================
+# Spark MLlib Metrics cần RDD dạng (prediction, label) là số thực (float)
+# Ta cần map label chữ (sentiment) sang số tương ứng với prediction
+# Dựa trên kết quả trước: Neutral=0.0, Negative=1.0, Positive=2.0
 
-# Tạo lại label gốc từ rule-based (giống bước train) để làm 'ground truth' giả định
-df_eval = df.withColumn(
-    "label_str",
-    when(
-        (col("text_clean").contains("peace") | col("text_clean").contains("hope") | col("text_clean").contains("win")), 
-        "positive"
-    ).when(
-        (col("text_clean").contains("war") | col("text_clean").contains("kill") | col("text_clean").contains("crisis")), 
-        "negative"
-    ).otherwise("neutral")
-)
+predictionAndLabels = df_pred.select("prediction", "sentiment") \
+    .rdd.map(lambda row: (
+        float(row.prediction), 
+        0.0 if row.sentiment == "neutral" else (1.0 if row.sentiment == "negative" else 2.0)
+    ))
 
-# Chuyển đổi String Label sang Index (Số)
-indexer = StringIndexer(inputCol="label_str", outputCol="label_idx")
-indexer_model = indexer.fit(df_eval)
-df_indexed = indexer_model.transform(df_eval)
+# ========================================================
+# 4. TÍNH TOÁN CHỈ SỐ (METRICS)
+# ========================================================
+metrics = MulticlassMetrics(predictionAndLabels)
 
-# Chuyển đổi Predicted Sentiment sang Index (Số) tương ứng
-# Lưu ý: Cần đảm bảo mapping giống nhau. Cách tốt nhất là dùng lại indexer model
-# Nhưng ở đây ta dùng StringIndexer thứ 2 cho cột prediction string
-pred_indexer = StringIndexer(inputCol="predicted_sentiment", outputCol="prediction_idx")
-# Fit trên chính cột prediction để lấy mapping
-df_final = pred_indexer.fit(df_indexed).transform(df_indexed)
+print("\n" + "="*50)
+print("   BÁO CÁO ĐÁNH GIÁ MÔ HÌNH (EVALUATION REPORT)")
+print("="*50)
 
-# 3. Tính toán Metrics
-print(">>> Đang tính toán các chỉ số đánh giá...")
+# 1. Ma trận nhầm lẫn (Confusion Matrix)
+print("\n>>> [1] Ma trận nhầm lẫn (Confusion Matrix):")
+print("   (Dòng: Thực tế | Cột: Dự đoán)")
+print(metrics.confusionMatrix().toArray())
 
-# Accuracy
-evaluator_acc = MulticlassClassificationEvaluator(
-    labelCol="label_idx", predictionCol="prediction_idx", metricName="accuracy")
-accuracy = evaluator_acc.evaluate(df_final)
+# 2. Các chỉ số tổng quát
+print(f"\n>>> [2] Chỉ số tổng quát:")
+print(f"   - Độ chính xác (Accuracy):  {metrics.accuracy:.2%}")
+print(f"   - Precision (Weighted):     {metrics.weightedPrecision:.2%}")
+print(f"   - Recall (Weighted):        {metrics.weightedRecall:.2%}")
+print(f"   - F1 Score (Weighted):      {metrics.weightedFMeasure():.2%}")
 
-# F1-Score
-evaluator_f1 = MulticlassClassificationEvaluator(
-    labelCol="label_idx", predictionCol="prediction_idx", metricName="f1")
-f1_score = evaluator_f1.evaluate(df_final)
+# 3. Chỉ số chi tiết từng lớp
+labels = [0.0, 1.0, 2.0]
+label_names = {0.0: "Neutral", 1.0: "Negative", 2.0: "Positive"}
 
-# Weighted Precision
-evaluator_prec = MulticlassClassificationEvaluator(
-    labelCol="label_idx", predictionCol="prediction_idx", metricName="weightedPrecision")
-precision = evaluator_prec.evaluate(df_final)
+print(f"\n>>> [3] Chỉ số chi tiết từng lớp:")
+print(f"{'Lớp (Label)':<15} | {'Precision':<10} | {'Recall':<10} | {'F1-Score':<10}")
+print("-" * 55)
 
-# Weighted Recall
-evaluator_rec = MulticlassClassificationEvaluator(
-    labelCol="label_idx", predictionCol="prediction_idx", metricName="weightedRecall")
-recall = evaluator_rec.evaluate(df_final)
+for label in labels:
+    print(f"{label_names[label]:<15} | {metrics.precision(label):<10.2%} | {metrics.recall(label):<10.2%} | {metrics.fMeasure(label):<10.2%}")
 
-print("="*40)
-print(f"KẾT QUẢ ĐÁNH GIÁ MÔ HÌNH (Trên tập dữ liệu Sample)")
-print("="*40)
-print(f"Accuracy:  {accuracy:.4f}")
-print(f"F1-Score:  {f1_score:.4f}")
-print(f"Precision: {precision:.4f}")
-print(f"Recall:    {recall:.4f}")
-print("="*40)
-
+print("\n" + "="*50)
 spark.stop()

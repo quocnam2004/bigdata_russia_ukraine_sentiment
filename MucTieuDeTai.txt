@@ -8,7 +8,7 @@ Xây dựng một hệ thống phân tích dữ liệu lớn sử dụng Apache 
 Đề tài hướng tới việc ứng dụng xử lý dữ liệu lớn, trích xuất thông tin từ văn bản (text mining) và học máy (machine learning) để hiểu rõ hơn về hành vi xã hội trên nền tảng mạng xã hội quy mô toàn cầu.
 💾 Bộ dữ liệu
 Tên: 🇺🇦 Ukraine Conflict Twitter Dataset
-Nguồn: https://www.kaggle.com/datasets/bwandowando/ukraine-russian-crisis-twitter-dataset-1-2-m-rows
+Nguồn: https://www.kaggle.com/datasets/bwandowando/ukraine-russian-crisis-twitter-dataset-1-2-m-rows/versions/508
 Quy mô: ~18 GB
 Mô tả: Bộ dữ liệu gồm hơn 1.2 triệu tweet được thu thập trong giai đoạn xung đột Nga–Ukraine (2022–2023), bao gồm các trường: tweet_id, created_at, user_id, text, lang, location, hashtags, retweet_count, like_count, user_verified, ... Dữ liệu ở định dạng CSV/JSON, phù hợp để lưu trữ và xử lý trên HDFS.
 ⚙️ Xây dựng bài toán Machine Learning
@@ -19,9 +19,6 @@ Mô tả: Bộ dữ liệu gồm hơn 1.2 triệu tweet được thu thập tron
 🧠 Tiêu chí đánh giá
 - Hiệu suất mô hình: F1-score (macro) hoặc AUC-PR để đo độ chính xác trong phân loại cảm xúc.
 - Hiệu suất hệ thống: Đánh giá khả năng xử lý dữ liệu lớn của pipeline Spark thông qua throughput và thời gian thực thi.
-📄 Định dạng nộp bài
-File kết quả: submission.csv gồm các cột:
-tweet_id | predicted_sentiment | prob_positive | prob_negative | prob_neutral
-Nộp kèm: mã nguồn xử lý (PySpark / Scala), báo cáo mô tả pipeline, phương pháp học máy và kết quả đánh giá.
+
 🔍 Tóm tắt giá trị đề tài
 Đề tài này giúp rèn luyện toàn bộ chuỗi kỹ năng phân tích dữ liệu lớn — từ ETL, trích xuất đặc trưng, đến học máy phân tán — trên một bộ dữ liệu thực tế, có quy mô lớn và ý nghĩa xã hội cao. Kết quả có thể mở rộng sang các hướng như phát hiện lan truyền thông tin sai lệch, phân tích mạng lưới ảnh hưởng, hoặc mô hình hoá tâm lý xã hội từ dữ liệu mạng xã hội quy mô toàn cầu.
