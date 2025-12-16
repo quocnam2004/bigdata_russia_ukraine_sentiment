@@ -32,6 +32,10 @@ def process_binary_file(filename_content_tuple):
             
             def get_safe(idx):
                 return parts[idx] if idx < len(parts) else None
+            
+            # Lọc ngôn ngữ: Chỉ lấy dòng có lang='en'
+            lang = get_safe(14)
+            if lang != 'en': continue
 
             # Lấy Tweet ID tại Index 9
             tid = get_safe(9)

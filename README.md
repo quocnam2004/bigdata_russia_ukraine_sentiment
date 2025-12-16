@@ -22,6 +22,8 @@
    hdfs dfs -ls /data/raw
    hdfs dfs -du -h /data/raw
    ```
+# Truy cập http://localhost:9870/ sau khi dùng lệnh start-dfs.cmd
+# Truy cập http://localhost:18080/ thì dùng lệnh .\bin\spark-class.cmd org.apache.spark.deploy.history.HistoryServer
 
 **Lưu ý:**
 
