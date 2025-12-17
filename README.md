@@ -86,13 +86,13 @@ spark-submit src\ml_sentiment_model.py
 **Bước 3: Đánh giá mô hình**  
 Tính toán các chỉ số Accuracy, F1-Score, Precision, Recall.
 ```powershell
-spark-submit src\model_evaluation.py
+spark-submit --conf spark.eventLog.enabled=true --conf spark.eventLog.dir=hdfs://localhost:9000/spark-logs --conf spark.history.fs.logDirectory=hdfs://localhost:9000/spark-logs src/model_evaluation.py
 ```
 
 **Bước 4: Phân tích & Vẽ biểu đồ**  
 Phân tích xu hướng theo thời gian, vị trí và xuất ra file ảnh .png.
 ```powershell
-spark-submit src\trend_analysis.py
+spark-submit --driver-memory 4g --executor-memory 4g src/trend_analysis.py
 ```
 
 ### ✅ TRƯỜNG HỢP 2: Chạy lại (Dữ liệu gốc đã có trên HDFS)

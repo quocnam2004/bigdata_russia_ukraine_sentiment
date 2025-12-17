@@ -5,146 +5,215 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
-import matplotlib.dates as mdates # Thư viện xử lý ngày tháng
+import matplotlib.dates as mdates
 
+# Cấu hình encoding
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+# CẤU HÌNH FONT CHỮ CHO MATPLOTLIB (QUAN TRỌNG)
+# Để hiển thị được tiếng Việt và ký tự đặc biệt
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['Arial', 'DejaVu Sans', 'Liberation Sans', 'Tahoma']
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, to_date, count, sum as spark_sum, when, explode, split, desc, trim, lower, regexp_replace, length
 
 # ========================================================
-# 1. KHỞI TẠO SPARK
+# 1. KHỞI TẠO SPARK (ĐÃ SỬA LỖI NAMENODE)
 # ========================================================
 spark = SparkSession.builder \
-    .appName("Trend_Analysis_Final_Polished") \
+    .appName("Trend_Analysis_Final") \
     .master("local[2]") \
     .config("spark.driver.memory", "4g") \
     .config("spark.sql.shuffle.partitions", "20") \
+    .config("spark.hadoop.fs.defaultFS", "hdfs://localhost:9000") \
+    .config("spark.eventLog.enabled", "true") \
+    .config("spark.eventLog.dir", "hdfs://localhost:9000/spark-logs") \
+    .config("spark.history.fs.logDirectory", "hdfs://localhost:9000/spark-logs") \
     .getOrCreate()
-
+    
+# Tăng tốc độ chuyển đổi sang Pandas bằng Apache Arrow
 spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
 
 # ========================================================
-# 2. ĐỌC DỮ LIỆU
+# 2. ĐỌC DỮ LIỆU KẾT QUẢ DỰ ĐOÁN
 # ========================================================
-print(">>> Đang đọc dữ liệu...")
-df_pred = spark.read.parquet("hdfs://localhost:9000/data/results/sentiment_predictions")
-df_clean = spark.read.parquet("hdfs://localhost:9000/data/processed/clean_tweets")
+# Đọc trực tiếp file kết quả (đã có nhãn sentiment) từ bước ML
+data_path = "hdfs://localhost:9000/data/results/sentiment_predictions"
+print(f">>> Đang đọc dữ liệu dự đoán từ: {data_path}")
 
-df_meta = df_clean.select(
-    "tweet_id", 
-    "created_at", 
-    col("location").alias("user_location_raw"), 
-    "hashtags",
-    "retweet_count"
-)
-
-df_merged = df_pred.join(df_meta, "tweet_id")
-
-# Chuẩn hóa Location
-df_final = df_merged.withColumn("user_location", 
-    when(lower(col("user_location_raw")).rlike("ukrain|україна|украина|kyiv|kiev"), "Ukraine")
-    .when(lower(col("user_location_raw")).rlike("usa|united states|america|washington|ny|ca"), "USA")
-    .when(lower(col("user_location_raw")).rlike("india|bharat"), "India")
-    .when(lower(col("user_location_raw")).rlike("uk|united kingdom|london|england|britain"), "UK")
-    .when(lower(col("user_location_raw")).rlike("germany|deutschland|berlin"), "Germany")
-    .when(lower(col("user_location_raw")).rlike("france|paris"), "France")
-    .otherwise(trim(col("user_location_raw")))
-)
-
-df_final = df_final.withColumn("sentiment_label", 
-    when(col("prediction") == 0.0, "Neutral")
-    .when(col("prediction") == 1.0, "Negative")
-    .when(col("prediction") == 2.0, "Positive")
-)
-
-df_final = df_final.withColumn("date", to_date(col("created_at")))
-df_final.cache()
-
-# ========================================================
-# [FIX 1] VẼ BIỂU ĐỒ HASHTAG (LỌC RÁC)
-# ========================================================
-print("\n>>> [FIX] Đang xử lý Hashtag (Lọc bỏ 'text', 'indices')...")
-
-# Loại bỏ ký tự thừa
-hashtag_clean = df_final.withColumn("hashtags_str", regexp_replace(col("hashtags"), r"[\[\]',\{\}:]", " "))
-
-# Tách từ
-hashtag_df = hashtag_clean.select("sentiment_label", explode(split(col("hashtags_str"), " ")).alias("hashtag"))
-
-# LỌC RÁC KỸ CÀNG:
-# 1. Bỏ từ 'text', 'indices' (do cấu trúc JSON)
-# 2. Bỏ các con số thuần túy (ví dụ '100', '114')
-# 3. Bỏ các từ quá ngắn (< 3 ký tự)
-hashtag_exploded = hashtag_df.filter(
-    (length(col("hashtag")) > 2) &
-    (col("hashtag") != "text") &
-    (col("hashtag") != "indices") &
-    (~col("hashtag").rlike("^[0-9]+$")) # Regex: Không phải là số
-)
-
-# Lấy Top 10
-top_hashtags = hashtag_exploded.groupBy("hashtag").count().orderBy(desc("count")).limit(10).select("hashtag")
-top_hash_list = [row.hashtag for row in top_hashtags.collect()]
-
-plot_data = hashtag_exploded.filter(col("hashtag").isin(top_hash_list)) \
-    .groupBy("hashtag", "sentiment_label").count().toPandas()
-
-if not plot_data.empty:
-    plt.figure(figsize=(12, 8))
-    # Thêm dấu # hiển thị cho đẹp
-    plot_data['hashtag'] = plot_data['hashtag'].apply(lambda x: "#" + x if not x.startswith("#") else x)
+try:
+    # File này đã chứa: tweet_id, sentiment, prediction, label
+    df_pred = spark.read.parquet(data_path)
     
-    sns.barplot(x='count', y='hashtag', hue='sentiment_label', data=plot_data, palette='viridis')
-    plt.title('Top 10 Hashtag nổi bật nhất')
-    plt.xlabel('Số lượng')
-    plt.ylabel('Hashtag')
-    plt.tight_layout()
-    plt.savefig('chart_3_hashtag_sentiment.png')
-    print("   -> Đã lưu: chart_3_hashtag_sentiment.png")
+    # Đọc thêm file gốc để lấy ngày tháng, location (nếu file dự đoán thiếu)
+    # Tuy nhiên, để tối ưu, ta nên join với clean_tweets nhưng chỉ lấy cột cần thiết
+    meta_path = "hdfs://localhost:9000/data/processed/clean_tweets"
+    df_meta = spark.read.parquet(meta_path).select("tweet_id", "created_at", "location", "hashtags", "retweet_count", "lang")
+    
+    # Join dữ liệu (Dùng Inner Join để chỉ lấy các tweet đã dự đoán)
+    print(">>> Đang ghép dữ liệu metadata...")
+    df_final = df_pred.join(df_meta, "tweet_id")
+    
+except Exception as e:
+    print(f"LỖI: Không đọc được dữ liệu. {e}")
+    sys.exit(1)
 
 # ========================================================
-# [FIX 2] BIỂU ĐỒ CAO ĐIỂM (LÀM GỌN NHÃN)
+# 3. TIỀN XỬ LÝ CHO VẼ BIỂU ĐỒ
 # ========================================================
-print("\n>>> [FIX] Vẽ lại biểu đồ cao điểm (Làm gọn nhãn)...")
+print(">>> Đang chuẩn hóa dữ liệu...")
 
-df_eng = df_final.withColumn("total_engagement", col("retweet_count"))
-daily_eng = df_eng.groupBy("date").agg(spark_sum("total_engagement").alias("daily_interaction")).orderBy("date").toPandas()
+# 3.1. Chuẩn hóa Location (Gộp các tên khác nhau về 1 mối)
+df_final = df_final.withColumn("user_location", 
+    when(lower(col("location")).rlike("ukrain|україна|украина|kyiv|kiev|odesa"), "Ukraine")
+    .when(lower(col("location")).rlike("usa|united states|america|washington|ny|ca|texas|florida"), "USA")
+    .when(lower(col("location")).rlike("india|bharat|delhi|mumbai"), "India")
+    .when(lower(col("location")).rlike("uk|united kingdom|london|england|britain"), "UK")
+    .when(lower(col("location")).rlike("germany|deutschland|berlin|munich"), "Germany")
+    .when(lower(col("location")).rlike("france|paris"), "France")
+    .when(lower(col("location")).rlike("poland|polska|warsaw|krakow"), "Poland")
+    .when(lower(col("location")).rlike("russia|moscow|kremlin|россия|москва"), "Russia")
+    .otherwise("Other") # Gom nhóm còn lại thành Other để biểu đồ đỡ rối
+)
 
-# Convert cột date sang datetime để matplotlib hiểu
+# 3.2. Chuyển đổi ngày tháng
+df_final = df_final.withColumn("date", to_date(col("created_at")))
+
+# Cache lại để dùng chung cho 4 biểu đồ
+df_final.cache()
+print(f">>> Sẵn sàng phân tích trên {df_final.count()} dòng dữ liệu.")
+
+# ========================================================
+# BIỂU ĐỒ 1: XU HƯỚNG CẢM XÚC THEO THỜI GIAN (TIME SERIES)
+# ========================================================
+print("\n>>> [1/4] Vẽ biểu đồ Xu hướng thời gian...")
+trend_df = df_final.groupBy("date", "sentiment").count().orderBy("date").toPandas()
+
+# Pivot table để vẽ line chart
+pivot_trend = trend_df.pivot(index='date', columns='sentiment', values='count').fillna(0)
+
+plt.figure(figsize=(12, 6))
+# Vẽ các đường với màu sắc chuẩn tâm lý học
+try:
+    sns.lineplot(data=pivot_trend['positive'], label='Positive', color='green', linewidth=2)
+    sns.lineplot(data=pivot_trend['negative'], label='Negative', color='red', linewidth=2)
+    sns.lineplot(data=pivot_trend['neutral'], label='Neutral', color='gray', linestyle='--', linewidth=1.5)
+except KeyError:
+    pass # Bỏ qua nếu thiếu lớp nào đó
+
+plt.title('Xu hướng cảm xúc theo thời gian (2022-2023)', fontsize=14)
+plt.xlabel('Thời gian')
+plt.ylabel('Số lượng Tweet')
+plt.grid(True, linestyle=':', alpha=0.6)
+plt.legend()
+plt.tight_layout()
+plt.savefig('chart_1_time_trend.png')
+print("   -> Đã lưu: chart_1_time_trend.png")
+
+# ========================================================
+# BIỂU ĐỒ 2: PHÂN BỐ CẢM XÚC THEO QUỐC GIA (STACKED BAR)
+# ========================================================
+print("\n>>> [2/4] Vẽ biểu đồ Vị trí địa lý...")
+
+# Lọc bỏ 'Other' và 'Unknown' để biểu đồ tập trung vào các nước lớn
+loc_df = df_final.filter(col("user_location") != "Other")
+
+# Tính toán
+loc_sentiment = loc_df.groupBy("user_location", "sentiment").count().toPandas()
+
+# Pivot để vẽ Stacked Bar Chart (Dễ so sánh tỷ lệ hơn)
+loc_pivot = loc_sentiment.pivot(index='user_location', columns='sentiment', values='count').fillna(0)
+# Sắp xếp theo tổng số lượng giảm dần
+loc_pivot['total'] = loc_pivot.sum(axis=1)
+loc_pivot = loc_pivot.sort_values('total', ascending=False).drop(columns='total')
+
+loc_pivot.plot(kind='bar', stacked=True, figsize=(12, 7), color=['red', 'gray', 'green'])
+plt.title('Phân bố cảm xúc tại các Quốc gia chủ chốt', fontsize=14)
+plt.xlabel('Quốc gia')
+plt.ylabel('Số lượng Tweet')
+plt.xticks(rotation=0)
+plt.tight_layout()
+plt.savefig('chart_2_location_sentiment.png')
+print("   -> Đã lưu: chart_2_location_sentiment.png")
+
+# ========================================================
+# BIỂU ĐỒ 3: TOP HASHTAG THEO CẢM XÚC (ĐÃ SỬA LỖI LABEL)
+# ========================================================
+print("\n>>> [3/4] Vẽ biểu đồ Top Hashtag...")
+
+# 1. Loại bỏ các ký tự JSON thừa ({text: , }, [, ])
+hashtag_df = df_final.withColumn("clean_tags", regexp_replace(col("hashtags"), r"\{text:|'text':|'indices':|\{|\[|\]|\}|'|\d+|:", " ")) \
+    .withColumn("tag", explode(split(col("clean_tags"), ","))) \
+    .withColumn("tag", trim(lower(col("tag"))))
+
+# 2. Lọc rác kỹ càng hơn
+hashtag_df = hashtag_df.filter(
+    (length(col("tag")) > 2) & 
+    (col("tag") != "text") & 
+    (col("tag") != "indices") &
+    (col("tag") != "")
+)
+
+# Lấy Top 10 Hashtag phổ biến nhất
+top_tags = hashtag_df.groupBy("tag").count().orderBy(desc("count")).limit(10).select("tag")
+top_tags_list = [r.tag for r in top_tags.collect()]
+
+# Lọc dữ liệu chỉ lấy top tags để vẽ
+plot_data = hashtag_df.filter(col("tag").isin(top_tags_list)) \
+    .groupBy("tag", "sentiment").count().toPandas()
+
+plt.figure(figsize=(12, 8))
+# Thêm dấu # vào trước tên tag cho đúng chuẩn Twitter
+plot_data['tag'] = plot_data['tag'].apply(lambda x: "#" + x if not x.startswith("#") else x)
+
+sns.barplot(x='count', y='tag', hue='sentiment', data=plot_data, 
+            palette={'positive': 'green', 'negative': 'red', 'neutral': 'gray'})
+plt.title('Top 10 Hashtag và Cảm xúc liên quan', fontsize=14)
+plt.xlabel('Số lượng')
+plt.ylabel('Hashtag')
+plt.grid(axis='x', linestyle='--', alpha=0.5)
+plt.tight_layout()
+plt.savefig('chart_3_hashtag_sentiment.png')
+print("   -> Đã lưu: chart_3_hashtag_sentiment.png")
+
+# ========================================================
+# BIỂU ĐỒ 4: PHÁT HIỆN SỰ KIỆN NÓNG (ANOMALY DETECTION)
+# ========================================================
+print("\n>>> [4/4] Vẽ biểu đồ Phát hiện sự kiện nóng...")
+
+# Tính tổng retweet theo ngày
+daily_eng = df_final.groupBy("date").agg(spark_sum("retweet_count").alias("interactions")).orderBy("date").toPandas()
 daily_eng['date'] = pd.to_datetime(daily_eng['date'])
 
-threshold = daily_eng['daily_interaction'].mean() + (1.5 * daily_eng['daily_interaction'].std())
+# Tính ngưỡng bất thường (Mean + 2*StdDev)
+mean_val = daily_eng['interactions'].mean()
+std_val = daily_eng['interactions'].std()
+threshold = mean_val + (2 * std_val)
 
 fig, ax = plt.subplots(figsize=(14, 7))
+sns.lineplot(data=daily_eng, x='date', y='interactions', label='Lượng tương tác (Retweets)', color='blue', ax=ax)
+ax.axhline(threshold, color='red', linestyle='--', label=f'Ngưỡng đột biến ({int(threshold):,})')
 
-# Vẽ đường line
-sns.lineplot(data=daily_eng, x='date', y='daily_interaction', label='Tổng Retweet', color='blue', ax=ax)
-ax.axhline(threshold, color='red', linestyle='--', label=f'Ngưỡng đột biến')
+# Đánh dấu các đỉnh
+peaks = daily_eng[daily_eng['interactions'] > threshold]
+ax.scatter(peaks['date'], peaks['interactions'], color='red', s=50, zorder=5)
 
-# Lấy các điểm cao điểm
-peaks = daily_eng[daily_eng['daily_interaction'] > threshold]
-ax.scatter(peaks['date'], peaks['daily_interaction'], color='red', s=100, zorder=5)
-
-# CHỈ HIỂN THỊ NHÃN CHO TOP 3 ĐỈNH CAO NHẤT (Để không bị rối)
-top_3_peaks = peaks.sort_values(by='daily_interaction', ascending=False).head(3)
-
-for _, row in top_3_peaks.iterrows():
-    # Format ngày tháng đẹp (dd-mm-yyyy)
-    date_str = row['date'].strftime('%d-%m-%Y')
-    ax.annotate(f"{date_str}", 
-                xy=(row['date'], row['daily_interaction']), 
-                xytext=(10, 10), textcoords='offset points',
+# Gắn nhãn ngày cho 3 đỉnh cao nhất
+top_peaks = peaks.sort_values('interactions', ascending=False).head(3)
+for _, row in top_peaks.iterrows():
+    ax.annotate(f"{row['date'].strftime('%d-%m-%Y')}", 
+                xy=(row['date'], row['interactions']), 
+                xytext=(10, 15), textcoords='offset points',
                 arrowprops=dict(arrowstyle="->", color='black'),
-                fontsize=10, fontweight='bold', color='darkred')
+                fontsize=9, fontweight='bold', color='darkred')
 
-# Định dạng trục ngày tháng
-ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1)) # Mỗi tháng 1 vạch
+# Định dạng trục X
+ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
 ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%Y'))
-plt.xticks(rotation=45) # Xoay nghiêng chữ ngày tháng
 
-plt.title('Biểu đồ Tương tác & Các sự kiện Cao điểm (Top 3)')
-plt.ylabel('Tổng lượng Retweet')
+plt.title('Phát hiện Sự kiện nóng dựa trên lượng Retweet', fontsize=14)
+plt.ylabel('Tổng Retweet')
 plt.xlabel('Thời gian')
 plt.legend()
 plt.grid(True, alpha=0.3)
@@ -152,32 +221,5 @@ plt.tight_layout()
 plt.savefig('chart_4_peaks_detection.png')
 print("   -> Đã lưu: chart_4_peaks_detection.png")
 
-# ========================================================
-# CÁC BIỂU ĐỒ CÒN LẠI (VẼ LẠI CHO ĐỒNG BỘ)
-# ========================================================
-# 1. TIME TREND
-print("\n>>> Vẽ lại biểu đồ xu hướng thời gian...")
-trend_df = df_final.groupBy("date", "sentiment_label").count().orderBy("date").toPandas()
-pivot_trend = trend_df.pivot(index='date', columns='sentiment_label', values='count').fillna(0)
-plt.figure(figsize=(12, 6))
-sns.lineplot(data=pivot_trend, markers=True, dashes=False)
-plt.title('Xu hướng thay đổi cảm xúc theo thời gian')
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.tight_layout()
-plt.savefig('chart_1_time_trend.png')
-
-# 2. LOCATION
-print("\n>>> Vẽ lại biểu đồ vị trí...")
-loc_df = df_final.filter((col("user_location") != "") & (col("user_location") != "Unknown") & (col("user_location").isNotNull()))
-top_locs = loc_df.groupBy("user_location").count().orderBy(desc("count")).limit(10).select("user_location")
-top_loc_list_final = [row.user_location for row in top_locs.collect()]
-loc_sentiment = loc_df.filter(col("user_location").isin(top_loc_list_final)).groupBy("user_location", "sentiment_label").count().toPandas()
-plt.figure(figsize=(12, 6))
-sns.barplot(x='count', y='user_location', hue='sentiment_label', data=loc_sentiment)
-plt.title('Phân bố cảm xúc tại Top 10 vị trí')
-plt.xticks(rotation=15) # Xoay nhẹ tên nước cho dễ đọc
-plt.tight_layout()
-plt.savefig('chart_2_location_sentiment.png')
-
-print("\n>>> HOÀN TẤT! Đã tối ưu hóa tất cả biểu đồ.")
+print("\n>>> HOÀN TẤT TOÀN BỘ!")
 spark.stop()
