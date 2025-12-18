@@ -29,23 +29,6 @@
 
 - Dữ liệu thật phải nằm trên HDFS (`hdfs://localhost:9000/data/raw/`) mới chạy được.
 - Quá trình upload có thể mất 10-30 phút tùy tốc độ ổ cứng/mạng.
-
-## 📁 Cấu trúc thư mục dự án
-```
-bigdata_russia_ukraine_sentiment/
-│
-├── data/
-│   ├── raw/                # (Trên HDFS) Dữ liệu gốc CSV
-│   ├── processed/          # (Trên HDFS) Dữ liệu Parquet đã làm sạch
-│   └── results/            # (Trên HDFS) Kết quả dự đoán & phân tích
-│
-├── src/
-│   ├── etl_preprocess.py       # Bước 1: Làm sạch, định nghĩa Schema, lưu Parquet
-│   ├── ml_sentiment_model.py   # Bước 2: Feature Eng (TF-IDF), Train (LogisticRegression), Predict
-│   ├── model_evaluation.py     # Bước 3: Đánh giá độ chính xác (F1, Accuracy)
-│   ├── trend_analysis.py       # Bước 4: Phân tích xu hướng & Vẽ biểu đồ
-│
-└── README.md
 ```
 
 ## ⚙️ Cấu hình môi trường (Windows Local)

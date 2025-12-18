@@ -19,6 +19,5 @@ Mô tả: Bộ dữ liệu gồm hơn 1.2 triệu tweet được thu thập tron
 🧠 Tiêu chí đánh giá
 - Hiệu suất mô hình: F1-score (macro) hoặc AUC-PR để đo độ chính xác trong phân loại cảm xúc.
 - Hiệu suất hệ thống: Đánh giá khả năng xử lý dữ liệu lớn của pipeline Spark thông qua throughput và thời gian thực thi.
-
 🔍 Tóm tắt giá trị đề tài
 Đề tài này giúp rèn luyện toàn bộ chuỗi kỹ năng phân tích dữ liệu lớn — từ ETL, trích xuất đặc trưng, đến học máy phân tán — trên một bộ dữ liệu thực tế, có quy mô lớn và ý nghĩa xã hội cao. Kết quả có thể mở rộng sang các hướng như phát hiện lan truyền thông tin sai lệch, phân tích mạng lưới ảnh hưởng, hoặc mô hình hoá tâm lý xã hội từ dữ liệu mạng xã hội quy mô toàn cầu.
